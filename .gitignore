@@ -1,0 +1,23 @@
+# 运行时产物 —— 绝不入库
+credentials.json
+state.json
+data/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 本地测试脚本
+test_*.py
+probe_*.py

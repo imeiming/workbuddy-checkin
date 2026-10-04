@@ -1,0 +1,299 @@
+# WorkBuddy 签到助手
+
+微信扫码授权后，每天自动领取 WorkBuddy 每日签到积分（100 分/天），并把结果通知给你。
+
+纯 Python 标准库实现，**零第三方依赖**，支持本地运行、Docker 与 WorkBuddy 云端托管三种部署方式。
+
+---
+
+## 目录
+
+- [功能](#功能)
+- [安装（快速开始）](#安装快速开始)
+- [部署方式](#部署方式)
+- [环境变量](#环境变量)
+- [使用说明](#使用说明)
+- [技术要点](#技术要点)
+- [目录结构](#目录结构)
+- [安全设计](#安全设计)
+- [常见问题](#常见问题)
+- [免责声明](#免责声明)
+
+---
+
+## 功能
+
+| 功能 | 说明 |
+|---|---|
+| 微信扫码授权 | 页面内生成二维码，扫码确认后完成绑定，令牌加密落盘 |
+| 手动签到 | 页面「立即签到」按钮，实时返回本次获得的积分 |
+| 自动签到 | 每天在设定时间自动签到（默认 09:10，北京时间） |
+| 结果通知 | 页面通知中心 + 可选 Webhook（企业微信 / 钉钉 / 飞书机器人） |
+| 签到历史 | 保留最近 120 天，含积分、连续天数、触发方式 |
+| 令牌自动续期 | access token 到期前自动用 refresh token 换新，无需重复扫码 |
+
+---
+
+## 安装（快速开始）
+
+### 环境要求
+
+| 项 | 要求 |
+|---|---|
+| Python | **3.10 及以上**（仅标准库，无需 pip 安装任何包） |
+| 网络 | 能访问 `https://www.workbuddy.cn` |
+| 浏览器 | 用于打开控制台页面扫码授权 |
+
+### 三步启动
+
+```bash
+# 1. 获取源码
+git clone https://github.com/imeiming/workbuddy-checkin.git
+cd workbuddy-checkin
+
+# 2. 启动服务（无需安装依赖）
+PORT=3000 python server.py
+
+# 3. 打开控制台
+#    浏览器访问 http://127.0.0.1:3000
+```
+
+Windows（PowerShell）的环境变量写法不同：
+
+```powershell
+$env:PORT = 3000
+python server.py
+```
+
+启动后点击**「获取登录二维码」**，微信扫码即可完成授权。
+
+> 若 3000 端口被占用，换一个即可：`PORT=8080 python server.py`。
+
+---
+
+## 部署方式
+
+### 方式一：本地直接运行
+
+适合本机使用。数据默认存放在：
+
+- Windows：`%LOCALAPPDATA%\WorkBuddyCheckin\`
+- 其他平台：`~/.workbuddycheckin/`
+
+后台常驻（Linux / macOS）：
+
+```bash
+nohup env PORT=3000 WB_CHECKIN_DATA_DIR=/opt/wb-checkin/data \
+  python server.py > checkin.log 2>&1 &
+```
+
+Linux 下注册为 systemd 服务（开机自启）：
+
+```ini
+# /etc/systemd/system/wb-checkin.service
+[Unit]
+Description=WorkBuddy Checkin Helper
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/wb-checkin
+Environment=PORT=3000
+Environment=WB_CHECKIN_DATA_DIR=/opt/wb-checkin/data
+Environment=WB_CHECKIN_SECRET_KEY=请填写一串足够长的随机字符串
+ExecStart=/usr/bin/python3 /opt/wb-checkin/server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now wb-checkin
+sudo systemctl status wb-checkin
+```
+
+### 方式二：Docker
+
+Dockerfile（保存为 `Dockerfile` 后构建）：
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY . /app
+
+ENV PORT=3000
+ENV WB_CHECKIN_DATA_DIR=/data
+
+EXPOSE 3000
+CMD ["python", "server.py"]
+```
+
+```bash
+docker build -t wb-checkin .
+
+docker run -d --name wb-checkin --restart unless-stopped \
+  -p 3000:3000 \
+  -v wb-checkin-data:/data \
+  -e WB_CHECKIN_SECRET_KEY=请填写一串足够长的随机字符串 \
+  wb-checkin
+```
+
+> `-v wb-checkin-data:/data` 必须保留，否则容器重启后令牌与签到历史会丢失。
+
+### 方式三：WorkBuddy 云端托管
+
+本项目是单端口 HTTP 服务，监听 `$PORT` 并绑定 `0.0.0.0`，符合云端托管要求，直接发布即可：
+
+- 启动命令：`python server.py`
+- 端口：环境变量 `PORT`
+- 建议同时注入 `WB_CHECKIN_SECRET_KEY`，确保容器重启后令牌仍可解密
+
+---
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `PORT` | `3000` | 服务监听端口 |
+| `HOST` | `0.0.0.0` | 监听地址 |
+| `WB_CHECKIN_DATA_DIR` | 平台默认目录 | 数据存放目录，容器部署建议指定到持久化卷 |
+| `WB_CHECKIN_SECRET_KEY` | 无 | 凭据加密密钥。非 Windows 环境**必须设置**，否则容器重启后令牌无法解密，需要重新扫码 |
+
+生成随机密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+---
+
+## 使用说明
+
+1. 打开应用首页，点击**「获取登录二维码」**
+2. 用微信扫码并在手机上确认
+3. 页面显示「授权成功」后即为绑定完成
+4. 之后每天会在设定时间自动签到；也可随时点**「立即签到」**手动触发
+
+在**设置**中可调整：
+
+- 自动签到开关与时间（默认 09:10，北京时间）
+- Webhook 地址，用于把签到结果推送到企业微信 / 钉钉 / 飞书群机器人
+
+---
+
+## 技术要点
+
+### 为什么必须服务端代理
+
+WorkBuddy 网关（`www.workbuddy.cn`）**不返回** `Access-Control-Allow-Origin`，实测 OPTIONS 预检返回 404、POST 响应无 CORS 头，浏览器无法直接跨域调用。因此所有网关请求都由服务端转发，前端只访问同源的 `/api/*`。
+
+### 接口协议
+
+逆向自 WorkBuddy Desktop 客户端，与官方客户端调用方式完全一致：
+
+| 用途 | 方法 | 路径 |
+|---|---|---|
+| 申请登录态 | POST | `/v2/plugin/auth/state?platform=workbuddy` |
+| 轮询登录令牌 | GET | `/v2/plugin/auth/token?state=<state>` |
+| 刷新令牌 | POST | `/v2/plugin/auth/token/refresh` |
+| 账号信息 | GET | `/v2/plugin/account` |
+| 签到状态 | POST | `/v2/billing/meter/checkin-activity-status` |
+| 领取积分 | POST | `/v2/billing/meter/daily-checkin` |
+
+鉴权头：`Authorization: Bearer <accessToken>` + `X-User-Id: <uid>`。
+
+签到业务码：`1001` 已签到、`1002` 不满足条件、`1003` 活动结束。
+
+> 已签到（1001）会被落库为「今日已签到」而非失败，从而终止当日重试——否则会形成每轮调度重复报错的死循环。
+
+### 绕过环境代理
+
+部分受管运行环境会把 `HTTP_PROXY` / `HTTPS_PROXY` 指向只放行内部流量的本地代理，urllib 默认读取这些变量会导致请求被拒（`upstream connect failed`）。`wb_client.py` 显式使用空 `ProxyHandler` 强制直连网关。
+
+### 纯标准库 QR Code 编码器
+
+不引入 `qrcode` 依赖，`qrcode.py` 自行实现了 Reed–Solomon 纠错、掩码选择与格式信息放置。实现过程中修复了三个会导致扫码失败的缺陷：
+
+1. 掩码被错误施加到定位 / 定时 / 校正图形
+2. 格式信息保留区判定反了，被数据位覆盖
+3. 固定黑模块 `(size-8, 8)` 被格式信息写入覆盖（仅在版本 ≥ 3 时暴露）
+
+### 调度策略
+
+调度线程每 **5 分钟**唤醒一次判断是否到达签到时刻。每日只需签到一次，无需高频轮询；已签到或处于失败冷却期（60 分钟）时直接跳过。
+
+---
+
+## 目录结构
+
+```
+.
+├── server.py        # HTTP 服务：路由 + 静态资源 + 网关代理
+├── service.py       # 业务编排：登录、签到、令牌续期、定时调度、通知
+├── wb_client.py     # WorkBuddy 网关客户端
+├── state.py         # 状态层：令牌保管、签到历史、设置、通知队列
+├── secret_store.py  # 凭据加密存储（DPAPI / 跨平台回退）
+├── qrcode.py        # 纯标准库 QR Code 编码器（SVG 输出）
+├── static/          # 控制台页面（HTML / CSS / JS）
+└── requirements.txt # 无第三方依赖
+```
+
+---
+
+## 安全设计
+
+- **令牌加密存储**：Windows 走 DPAPI（`CryptProtectData`），其他平台走 `WB_CHECKIN_SECRET_KEY` 派生的对称加密，令牌永不明文落盘
+- **令牌与状态分离**：`credentials.json` 加密，`state.json` 不含敏感字段
+- **前端不接触令牌**：所有鉴权逻辑在服务端完成
+- **原子写入**：所有文件落盘均为「临时文件 + `os.replace`」，避免并发产生半截文件
+- **日志脱敏**：调试输出不打印 query 参数（其中可能包含临时登录态）
+
+### 数据目录内容
+
+| 文件 | 说明 |
+|---|---|
+| `credentials.json` | 加密后的登录令牌，**不要提交到任何仓库** |
+| `state.json` | 签到历史与设置（无敏感字段） |
+
+仓库已附带 `.gitignore` 忽略上述文件；若不慎泄露，登录应用首页退出登录即可清除本地凭据。
+
+---
+
+## 常见问题
+
+**扫码后一直显示「等待微信确认」**
+登录会话有效期约 5 分钟，超时需重新获取二维码。
+
+**提示「登录已过期，请重新微信扫码授权」**
+refresh token 也已过期，属于账号侧安全策略，需重新扫码。
+
+**提示「尚未授权」**
+说明本地令牌文件不存在或已被删除（例如重新部署、清空数据卷），重新扫码一次即可。
+
+**提示「当前不满足签到条件」（1002）/「签到活动已结束」（1003）**
+签到活动尚未开始或已结束，可在页面查看活动起止时间。
+
+**自动签到没有触发**
+自动签到依赖进程在线。离线期间不会补执行；下次打开会显示当日状态，点「立即签到」手动补签即可。
+
+**容器内提示需要重新扫码**
+检查是否注入了 `WB_CHECKIN_SECRET_KEY`，且数据卷是否持久化。密钥变更后旧令牌无法解密。
+
+---
+
+## 免责声明
+
+本项目为个人自用工具，仅供学习研究与技术交流，按其用途引发的后果由使用者自行承担。
+
+- 接口协议逆向自本地客户端，仅用于实现客户端已有的签到功能，未发现在破坏任何服务与技术保护措施
+- 使用前请务必确认自身有权访问相应账号，并**遵守 WorkBuddy 的服务条款**
+- 若官方接口或协议发生变化，本项目可能失效。若收到官方停止相关使用的要求，请立即停止使用
+- 请勿将本项目用于任何批量注册、账号交易或超出正常签到范围的用途
+
+---
+
+## License
+
+[MIT](LICENSE)

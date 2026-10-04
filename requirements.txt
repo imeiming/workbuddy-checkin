@@ -1,0 +1,9 @@
+# WorkBuddy 签到助手仅使用 Python 标准库，无需安装任何依赖。
+# 运行环境要求：Python 3.9+
+#
+# 依赖说明：
+#   - HTTP 服务      : http.server（标准库）
+#   - HTTP 客户端    : urllib.request（标准库）
+#   - 凭据加密       : ctypes 调用 Windows DPAPI（标准库）
+#   - 二维码生成     : qrcode.py 为自实现纯标准库编码器
+#   - 数据持久化     : json + tempfile（标准库）

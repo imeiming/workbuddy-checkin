@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>WorkBuddy 签到助手</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="hero-text">
+      <h1>WorkBuddy 签到助手</h1>
+      <p>微信扫码授权，每日自动领取 100 积分</p>
+    </div>
+    <div class="hero-badge" id="authBadge">检测中…</div>
+  </header>
+
+  <!-- 消息条 -->
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- 登录卡片 -->
+  <section class="card" id="loginCard">
+    <div class="card-head">
+      <h2>账号授权</h2>
+      <span class="hint">微信扫码登录</span>
+    </div>
+    <div class="card-body">
+      <div class="login-grid">
+        <div class="qr-box">
+          <div id="qrHolder" class="qr-holder">
+            <p class="muted">点击下方按钮生成登录二维码</p>
+          </div>
+        </div>
+        <div class="login-side">
+          <ol class="steps">
+            <li>点击「获取登录二维码」</li>
+            <li>用微信扫描二维码并在手机端确认</li>
+            <li>授权成功后自动完成绑定</li>
+          </ol>
+          <div class="btn-row">
+            <button class="btn primary" id="btnStartLogin">获取登录二维码</button>
+            <button class="btn ghost" id="btnCancelLogin" hidden>取消</button>
+          </div>
+          <p class="scan-status" id="scanStatus">未开始</p>
+          <p class="muted small">扫码链接也可直接在浏览器打开：<br />
+            <a id="authLink" href="#" target="_blank" rel="noopener" class="link">—</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 积分总览 -->
+  <section class="card" id="statusCard" hidden>
+    <div class="card-head">
+      <h2>今日签到</h2>
+      <button class="btn small" id="btnRefresh">刷新</button>
+    </div>
+    <div class="card-body">
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="stat-label">今日状态</span>
+          <strong class="stat-value" id="statToday">—</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">每日可得</span>
+          <strong class="stat-value" id="statDaily">—</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">连续签到</span>
+          <strong class="stat-value" id="statStreak">—</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">累计积分</span>
+          <strong class="stat-value" id="statTotal">—</strong>
+        </div>
+      </div>
+      <div class="btn-row center">
+        <button class="btn primary lg" id="btnCheckin">立即签到</button>
+      </div>
+      <p class="muted small center" id="checkinHint"></p>
+    </div>
+  </section>
+
+  <!-- 自动签到设置 -->
+  <section class="card" id="settingCard" hidden>
+    <div class="card-head">
+      <h2>自动签到</h2>
+    </div>
+    <div class="card-body">
+      <div class="setting-row">
+        <label class="switch">
+          <input type="checkbox" id="autoCheckin" />
+          <span class="slider"></span>
+        </label>
+        <div class="setting-text">
+          <strong>每日自动签到</strong>
+          <span class="muted small">应用在线时，到点自动领取积分</span>
+        </div>
+        <input type="time" id="checkinTime" class="time-input" value="09:10" />
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>结果通知（Webhook）</strong>
+          <span class="muted small">可选。填入机器人地址，签到结果会推送到该地址</span>
+        </div>
+        <input type="url" id="webhookUrl" class="text-input" placeholder="https://…" />
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" id="btnSaveSettings">保存设置</button>
+        <button class="btn ghost" id="btnLogout">清除登录凭证</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 通知 -->
+  <section class="card" id="notifyCard" hidden>
+    <div class="card-head">
+      <h2>最近通知</h2>
+    </div>
+    <div class="card-body">
+      <ul class="notify-list" id="notifyList"></ul>
+    </div>
+  </section>
+
+  <!-- 历史 -->
+  <section class="card" id="historyCard" hidden>
+    <div class="card-head">
+      <h2>签到历史</h2>
+      <span class="hint" id="historyStat"></span>
+    </div>
+    <div class="card-body">
+      <table class="table" id="historyTable">
+        <thead>
+          <tr><th>日期</th><th>结果</th><th>积分</th><th>连续</th><th>来源</th></tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+      <p class="muted small" id="historyEmpty" hidden>暂无签到记录</p>
+    </div>
+  </section>
+
+  <footer class="foot muted small">
+    数据来源：WorkBuddy 官方计费接口 www.workbuddy.cn（/v2/billing/meter/daily-checkin）· 服务端代理调用
+  </footer>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
