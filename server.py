@@ -43,10 +43,13 @@ START_TIME = time.time()
 # 解决思路：进程自己定时访问一次自己的公网地址，制造持续的活动流量，
 # 让平台判定应用「在线」而不再回收。整个过程发生在云端，不依赖任何本地设备开机。
 #
-# 公网地址优先取环境变量 WB_CHECKIN_PUBLIC_URL；未设置时从首个请求的 Host 头推断。
-# 云端托管分配的固定公网地址。仅当环境变量未配置、且请求头也无法推断出公网域名时兜底，
-# 避免容器内部 Host（127.0.0.1 / 内网地址）导致自心跳打到错误目标。
-FALLBACK_PUBLIC_URL = "https://wb-checkin-77303.app.workbuddy.host"
+# 公网地址优先取环境变量 WB_CHECKIN_PUBLIC_URL；未设置时从首个请求的 Host 头推断；
+# 两者都拿不到时退回本机回环地址（优先保证进程有持续活动，而非空转放弃）。
+#
+# 部署建议：通过环境变量注入自己的入口地址，例如
+#   WB_CHECKIN_PUBLIC_URL=https://your-app.app.workbuddy.host
+# 该地址属于个人部署信息，请勿写入源码仓库。
+LOCAL_URL_TEMPLATE = "http://127.0.0.1:{port}"
 
 SELF_PING_ENABLED = os.environ.get("WB_CHECKIN_SELFPING", "1").strip() != "0"
 # 实测平台的空闲回收阈值远小于 3 分钟（180s 间隔时容器在首次心跳前就被回收），
@@ -131,16 +134,26 @@ def _self_ping_loop() -> None:
         time.sleep(SELF_PING_INTERVAL_S)
 
 
+def _self_ping_target() -> str:
+    """自心跳目标地址：环境变量 / 请求头推断的公网入口 → 否则本机回环。
+
+    本机回环虽然不经过平台网关，但仍是持续活动的兜底手段：宁可有本地请求，
+    也不要在拿不到公网地址时彻底放弃心跳。
+    """
+    with _self_ping_lock:
+        url = str(_self_ping_state["url"]).strip()
+    return url or LOCAL_URL_TEMPLATE.format(port=int(os.environ.get("PORT", "3000") or 3000))
+
+
 def _self_ping_once() -> None:
     """执行一次自心跳并更新统计。"""
     if not SELF_PING_ENABLED:
         return
-    with _self_ping_lock:
-        url = str(_self_ping_state["url"]) or FALLBACK_PUBLIC_URL
+    url = _self_ping_target()
     if not url:
         return
     try:
-        # 同样绕过环境代理，直接走公网回环访问自己
+        # 同样绕过环境代理，直接回环访问自己
         opener = build_opener(ProxyHandler({}))
         with opener.open(url + SELF_PING_PATH, timeout=15) as resp:
             resp.read()
@@ -159,10 +172,14 @@ def _self_ping_snapshot() -> dict[str, Any]:
     with _self_ping_lock:
         state = dict(_self_ping_state)
     last_ok = state["lastOkAt"]
+    target = _self_ping_target()
     return {
         "enabled": SELF_PING_ENABLED,
         "intervalSeconds": SELF_PING_INTERVAL_S,
-        "url": state["url"],
+        "url": state["url"] or "",
+        "target": target,
+        "targetIsLoopback": target.startswith("http://127.0.0.1")
+        or target.startswith("http://localhost"),
         "runs": state["runs"],
         "fails": state["fails"],
         "lastOkSecondsAgo": int(time.time() - last_ok) if last_ok else None,
