@@ -251,7 +251,6 @@ body {
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 .center { text-align: center; }
-.foot { text-align: center; margin-top: 24px; }
 [hidden] { display: none !important; }
 
 @media (max-width: 640px) {

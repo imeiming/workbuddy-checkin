@@ -7,6 +7,8 @@
   var loginState = null;   // 当前登录会话 state
   var pollTimer = null;
 
+  var RENDER_LIMIT = 30;      // 页面展示条数
+
   // ---------- 工具 ----------
   function toast(msg, kind) {
     var el = $("toast");
@@ -43,6 +45,13 @@
       renderStatus(data);
       renderSettings(data.settings || {});
       renderNotifications(data.notifications || []);
+      // 服务端在本次请求中补齐了错过的定时签到（容器休眠后由访问触发）
+      if (data.autoTriggered) {
+        var r = data.lastResult || {};
+        if (r.claimed) toast("已按设定时间自动签到，+" + r.credit + " 积分", "ok");
+        else if (r.status === "already_claimed") toast("今日已签到", "ok");
+        else toast("自动签到已触发但未成功：" + (r.msg || "未知原因"), "err");
+      }
       return data;
     }).catch(function (err) {
       $("authBadge").textContent = "服务异常";
@@ -62,9 +71,22 @@
       badge.textContent = "未授权";
       badge.className = "hero-badge warn";
       ["statusCard", "settingCard", "historyCard"].forEach(function (id) { $(id).hidden = true; });
+      // 明确说明「为什么又要重新登录」，而不是只显示一个笼统的未授权
+      var hint = credentialHint(data.credential);
+      if (hint) $("scanStatus").textContent = hint;
     }
     // 有通知才显示通知卡片
     $("notifyCard").hidden = !(data.notifications && data.notifications.length);
+  }
+
+  // 把服务端的凭据自检翻译成人话：区分「没存过」与「存过但读不出来」。
+  function credentialHint(credential) {
+    if (!credential || !credential.fileExists) return "";
+    if (credential.decryptable) return "";
+    if (credential.keySource === "machine") {
+      return "已保存的凭据读不出来：密钥随容器变化失效了，需要重新扫码（修复后不会再出现）";
+    }
+    return "已保存的凭据读不出来：" + (credential.reason || "未知原因") + "，请重新扫码";
   }
 
   function renderStatus(data) {
@@ -122,51 +144,64 @@
   }
 
   // ---------- 历史 ----------
+  function serverRows(limit) {
+    return api("/api/history?limit=" + limit).then(function (d) { return d.history || []; });
+  }
+
+  function renderRows(rows) {
+    var tb = $("historyBody");
+    tb.innerHTML = "";
+    $("historyEmpty").hidden = rows.length > 0;
+
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+
+      var tdDate = document.createElement("td");
+      tdDate.textContent = r.date || "";
+      tr.appendChild(tdDate);
+
+      var tdRes = document.createElement("td");
+      var pill = document.createElement("span");
+      if (r.claimed) { pill.className = "pill ok"; pill.textContent = "成功"; }
+      else if (r.status === "already_claimed") { pill.className = "pill info"; pill.textContent = "已签过"; }
+      else if (r.status === "not_eligible" || r.status === "event_ended") { pill.className = "pill warn"; pill.textContent = "不可签"; }
+      else { pill.className = "pill err"; pill.textContent = "失败"; }
+      tdRes.appendChild(pill);
+      tr.appendChild(tdRes);
+
+      var tdCredit = document.createElement("td");
+      tdCredit.textContent = r.credit ? "+" + r.credit : "—";
+      tr.appendChild(tdCredit);
+
+      var tdStreak = document.createElement("td");
+      tdStreak.textContent = r.streakDays ? r.streakDays + " 天" : "—";
+      tr.appendChild(tdStreak);
+
+      var tdSrc = document.createElement("td");
+      tdSrc.textContent = r.source === "auto" ? "自动" : "手动";
+      tr.appendChild(tdSrc);
+
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderStats(rows) {
+    var ok = rows.filter(function (r) { return !!r.claimed; });
+    var credits = ok.reduce(function (sum, r) { return sum + (Number(r.credit) || 0); }, 0);
+    $("historyStat").textContent =
+      "共 " + rows.length + " 天 · 成功 " + ok.length + " 天 · 累计 " + credits + " 积分";
+  }
+
+  function renderHistory(rows, sourceText) {
+    renderRows(rows);
+    renderStats(rows);
+    if ($("historySource")) $("historySource").textContent = sourceText || "";
+  }
+
+  // 单人使用：签到记录统一由服务端保存（随应用数据目录持久化），前端只负责读取展示。
   function loadHistory() {
-    return api("/api/history?limit=30").then(function (data) {
-      var rows = data.history || [];
-      var tb = $("historyBody");
-      tb.innerHTML = "";
-      $("historyEmpty").hidden = rows.length > 0;
-
-      rows.forEach(function (r) {
-        var tr = document.createElement("tr");
-
-        var tdDate = document.createElement("td");
-        tdDate.textContent = r.date || "";
-        tr.appendChild(tdDate);
-
-        var tdRes = document.createElement("td");
-        var pill = document.createElement("span");
-        if (r.claimed) { pill.className = "pill ok"; pill.textContent = "成功"; }
-        else if (r.status === "already_claimed") { pill.className = "pill info"; pill.textContent = "已签过"; }
-        else if (r.status === "not_eligible" || r.status === "event_ended") { pill.className = "pill warn"; pill.textContent = "不可签"; }
-        else { pill.className = "pill err"; pill.textContent = "失败"; }
-        tdRes.appendChild(pill);
-        tr.appendChild(tdRes);
-
-        var tdCredit = document.createElement("td");
-        tdCredit.textContent = r.credit ? "+" + r.credit : "—";
-        tr.appendChild(tdCredit);
-
-        var tdStreak = document.createElement("td");
-        tdStreak.textContent = r.streakDays ? r.streakDays + " 天" : "—";
-        tr.appendChild(tdStreak);
-
-        var tdSrc = document.createElement("td");
-        tdSrc.textContent = r.source === "auto" ? "自动" : "手动";
-        tr.appendChild(tdSrc);
-
-        tb.appendChild(tr);
-      });
-
-      var stats = null;
-      api("/api/overview").then(function (d) {
-        stats = d.stats || {};
-        var s = stats;
-        $("historyStat").textContent =
-          "共 " + (s.totalDays || 0) + " 天 · 成功 " + (s.successDays || 0) + " 天 · 累计 " + (s.totalCredits || 0) + " 积分";
-      });
+    return serverRows(RENDER_LIMIT).then(function (rows) {
+      renderHistory(rows, "记录保存在应用服务端，按自然日去重");
     }).catch(function (e) { console.error(e); });
   }
 

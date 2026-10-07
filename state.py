@@ -62,7 +62,10 @@ class AppState:
     def __init__(self, data_dir: Path | None = None) -> None:
         self.dir = data_dir or app_data_dir()
         self.state_path = self.dir / "state.json"
-        self.secret = SecretStore(self.dir / "credentials.json")
+        # 备用凭据副本放在应用目录：云端容器的数据目录被重置时仍有机会免重新扫码。
+        mirror_dir = Path(__file__).resolve().parent
+        mirror = None if os.environ.get("WB_CHECKIN_NO_MIRROR") else mirror_dir / ".credentials.json"
+        self.secret = SecretStore(self.dir / "credentials.json", mirror=mirror)
         self._lock = threading.RLock()
         self.notifications: deque[dict[str, Any]] = deque(maxlen=MAX_NOTIFICATIONS)
         self._load()
@@ -126,6 +129,18 @@ class AppState:
 
     def has_token(self) -> bool:
         return self.load_token() is not None
+
+    def credential_status(self) -> dict[str, Any]:
+        """凭据自检结果（供 /api/diag 与前端提示使用）。"""
+        return self.secret.probe()
+
+    def verify_credentials(self) -> bool:
+        """保存凭据后立即读回校验。
+
+        云端容器若把密钥/文件写在不稳定的位置，这里会立刻暴露
+        「刚登录完就读不出来」，而不是等到下次请求才发现掉登录。
+        """
+        return self.secret.load() is not None
 
     # ---------- 账号 ----------
 
