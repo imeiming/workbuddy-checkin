@@ -220,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     def _send_error_json(self, message: str, status: int = 400) -> None:
         self._send_json({"ok": False, "message": message}, status)
@@ -246,9 +246,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     # ---------- 路由 ----------
+
+    def _write_body(self, body: bytes) -> None:
+        """写出响应体；HEAD 请求只回头部，不回 body（HTTP 语义）。"""
+        if self.command == "HEAD":
+            return
+        self.wfile.write(body)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        """响应 HEAD 请求。
+
+        UptimeRobot / cron-job.org 等外部可用性监控默认用 HEAD 探测，
+        而 BaseHTTPRequestHandler 未实现 do_HEAD 时会返回 501，
+        监控端据此判定「站点离线」——外部保活因此失效。
+        这里复用 GET 路由：状态码与响应头（含 Content-Length）照常发出，仅不发响应体。
+        """
+        self.do_GET()
 
     def do_GET(self) -> None:  # noqa: N802
         _remember_public_url(self.headers)

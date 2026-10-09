@@ -251,6 +251,18 @@ WorkBuddy 网关（`www.workbuddy.cn`）**不返回** `Access-Control-Allow-Orig
 
 > 已签到（1001）会被落库为「今日已签到」而非失败，从而终止当日重试——否则会形成每轮调度重复报错的死循环。
 
+### HEAD 请求与外部可用性监控
+
+UptimeRobot / cron-job.org 等外部监控默认用 **HEAD** 请求探测。Python 的
+`BaseHTTPRequestHandler` 未实现 `do_HEAD` 时会返回 `501 Not Implemented`，监控端据此判定
+「站点离线」，外部保活会静默失效——这是一个很容易踩的坑。
+
+本项目已实现 `do_HEAD`：复用 GET 路由，状态码与响应头（含 `Content-Length`）照常发出，
+仅不发响应体，因此对 `/api/health`、`/api/overview`、`/`、`/static/*` 的 HEAD 探测均返回 200。
+
+建议把外部监控的 URL 设为 **`/api/overview`**（而不是 `/api/health`）：它除了保活之外，
+还会在唤醒冷启动容器时**立即检查并补签**，无需等待调度线程的下一轮巡检。
+
 ### 绕过环境代理
 
 部分受管运行环境会把 `HTTP_PROXY` / `HTTPS_PROXY` 指向只放行内部流量的本地代理，urllib 默认读取这些变量会导致请求被拒（`upstream connect failed`）。`wb_client.py` 显式使用空 `ProxyHandler` 强制直连网关。
