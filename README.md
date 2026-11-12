@@ -192,7 +192,7 @@ docker run -d --name wb-checkin --restart unless-stopped \
 | `WB_CHECKIN_NO_MIRROR`         | 无         | 设为任意值即关闭「应用目录凭据备份」，只写数据目录                      |
 | `WB_CHECKIN_SELFPING`          | `1`       | 设为 `0` 关闭容器自心跳保活                               |
 | `WB_CHECKIN_SELFPING_INTERVAL` | `30`      | 自心跳间隔（秒），最小 15                                 |
-| `WB_CHECKIN_PUBLIC_URL`        | 无         | 自心跳目标地址。云端部署**建议显式设为自己的入口域名**；留空时先从请求 Host 推断，推断不到退回本机回环地址 |
+| `WB_CHECKIN_PUBLIC_URL`        | 无         | 自心跳目标地址，可携带查询串（如 `?sharecode=XXXX`，路径会自动插到查询串之前）。云端部署**建议显式设为自己的入口域名**；留空时先从请求 Host 推断，推断不到退回本机回环地址 |
 
 生成随机密钥（可选，用于多机共享同一份凭据）：
 
@@ -231,6 +231,14 @@ WorkBuddy 网关（`www.workbuddy.cn`）**不返回** `Access-Control-Allow-Orig
 3. **请求级兜底**：任何一次 `/api/overview` 请求（包括打开页面）都会检查是否满足签到条件，满足即刻签到并当场刷新返回——即使容器刚被回收冷启动，也能立刻补上。
 
 > 注意：自心跳的目标**优先用环境变量 `WB_CHECKIN_PUBLIC_URL` 显式指定**。容器内 `Host` 头往往是平台内网域名（形如 `*.sandbox.xxx.club`），不可作为公网入口，代码会识别并跳过这类地址。
+>
+> 若托管平台对入口地址做了**分享码校验**（缺分享码的请求被网关以 403「链接不完整」拦截，请求到不了应用进程），需把分享码一并注入：
+>
+> ```bash
+> WB_CHECKIN_PUBLIC_URL="https://your-app.app.workbuddy.host?sharecode=XXXX" python server.py
+> ```
+>
+> 自心跳会自动把路径插到查询串之前（`/api/health?sharecode=XXXX`），保活与请求级补签才不会失效。
 
 ### 接口协议
 

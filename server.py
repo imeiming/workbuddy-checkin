@@ -48,6 +48,9 @@ START_TIME = time.time()
 #
 # 部署建议：通过环境变量注入自己的入口地址，例如
 #   WB_CHECKIN_PUBLIC_URL=https://your-app.app.workbuddy.host
+# 平台开启分享码校验后，需把分享码一并注入，否则网关返回 403「链接不完整」，
+# 自心跳到不了应用进程（保活与请求级补签全部失效）：
+#   WB_CHECKIN_PUBLIC_URL=https://your-app.app.workbuddy.host?sharecode=XXXX
 # 该地址属于个人部署信息，请勿写入源码仓库。
 LOCAL_URL_TEMPLATE = "http://127.0.0.1:{port}"
 
@@ -145,6 +148,20 @@ def _self_ping_target() -> str:
     return url or LOCAL_URL_TEMPLATE.format(port=int(os.environ.get("PORT", "3000") or 3000))
 
 
+def _ping_url(base: str) -> str:
+    """拼出自心跳完整 URL。
+
+    入口地址可能携带查询串（如分享码 ?sharecode=XXXX）：
+    平台网关对缺分享码的请求直接返回 403，请求根本到不了应用进程，
+    因此必须把路径插在查询串之前，保留分享码。
+    """
+    base = base.rstrip("/")
+    if "?" in base:
+        origin, query = base.split("?", 1)
+        return f"{origin.rstrip('/')}{SELF_PING_PATH}?{query}"
+    return f"{base}{SELF_PING_PATH}"
+
+
 def _self_ping_once() -> None:
     """执行一次自心跳并更新统计。"""
     if not SELF_PING_ENABLED:
@@ -155,7 +172,7 @@ def _self_ping_once() -> None:
     try:
         # 同样绕过环境代理，直接回环访问自己
         opener = build_opener(ProxyHandler({}))
-        with opener.open(url + SELF_PING_PATH, timeout=15) as resp:
+        with opener.open(_ping_url(url), timeout=15) as resp:
             resp.read()
         with _self_ping_lock:
             _self_ping_state["runs"] += 1
@@ -172,7 +189,8 @@ def _self_ping_snapshot() -> dict[str, Any]:
     with _self_ping_lock:
         state = dict(_self_ping_state)
     last_ok = state["lastOkAt"]
-    target = _self_ping_target()
+    base = _self_ping_target()
+    target = _ping_url(base)
     return {
         "enabled": SELF_PING_ENABLED,
         "intervalSeconds": SELF_PING_INTERVAL_S,
